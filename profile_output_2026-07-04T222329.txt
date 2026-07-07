@@ -1,0 +1,123 @@
+Timer unit: 1e-09 s
+
+Total time: 14.098 s
+File: /home/artistreak/projects/personal/com-mov/cell-free/main.py
+Function: CellFree.simulate at line 111
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   111                                               @line_profiler.profile
+   112                                               def simulate(
+   113                                                   self, rng: np.random.Generator,
+   114                                                   geometry_instances: int, drops_per_geom: int
+   115                                               ) -> CellFreeSimulationResults:
+   116         3      13114.0   4371.3      0.0          statistical_sinr = np.zeros((geometry_instances, self.K))
+   117         3      61035.0  20345.0      0.0          instantaneous_sinr = np.zeros((geometry_instances, drops_per_geom, self.K))
+   118                                           
+   119       903   36587526.0  40517.7      0.3          for i in tqdm(list(range(geometry_instances))):
+   120       900    8508684.0   9454.1      0.1              pos_ue_x = rng.uniform(0, self.area_dimensions[0]/2, size=self.K)
+   121       900    2637789.0   2930.9      0.0              pos_ue_y = rng.uniform(0, self.area_dimensions[1]/2, size=self.K)
+   122                                           
+   123       900    2514185.0   2793.5      0.0              pos_ap_x = rng.uniform(0, self.area_dimensions[0]/2, size=self.M)
+   124       900    2566088.0   2851.2      0.0              pos_ap_y = rng.uniform(0, self.area_dimensions[1]/2, size=self.M)
+   125                                           
+   126                                                       # (M, K)
+   127      1800    2011033.0   1117.2      0.0              ap_to_ue_dist = np.sqrt(
+   128      2700   11064378.0   4097.9      0.1                  (pos_ap_x[:, None] - pos_ue_x[None, :])**2
+   129       900    4584554.0   5093.9      0.0                  + (pos_ap_y[:, None] - pos_ue_y[None, :])**2
+   130       900    1499446.0   1666.1      0.0                  + (self.ue_h - self.ap_h)**2
+   131                                                       )
+   132       900    2794788.0   3105.3      0.0              ap_to_ue_dist = np.maximum(ap_to_ue_dist, 1.0)
+   133                                           
+   134       900   12458833.0  13843.1      0.1              shadowing_db = rng.normal(0, self.shadowing_std_db, size=(self.M, self.K))
+   135       900     221040.0    245.6      0.0              ap_to_ue_pathloss_db = (
+   136      2700    6583518.0   2438.3      0.0                  fspl(1., self.fc)
+   137       900   10290632.0  11434.0      0.1                  + self.close_in_fs_exponent * 10 * np.log10(ap_to_ue_dist)
+   138       900     110852.0    123.2      0.0                  + shadowing_db
+   139                                                       )
+   140       900   17756494.0  19729.4      0.1              ap_to_ue_pathloss_lin = 10**(ap_to_ue_pathloss_db / 10)
+   141                                                       # NOTE: kinda Eq. (30)
+   142                                                       # FIXME: talk to professor about unreliable notation
+   143                                                       # Omega is gain, not path loss. So the slides are wrong
+   144       900    1759169.0   1954.6      0.0              Omega = 1/ap_to_ue_pathloss_lin
+   145                                           
+   146                                                       # SINR and achievable rate based on statistics only:
+   147                                                       # Eq. (35)
+   148                                                       # TODO: noise_std_lin_per_component, pilot_pow_lin
+   149       900     308236.0    342.5      0.0              C = (
+   150      1800    4430166.0   2461.2      0.0                  np.sqrt(self.tau_cf * self.pilot_pow_lin)  * Omega
+   151                                                           / (
+   152      1800    3371993.0   1873.3      0.0                      self.tau_cf * self.pilot_pow_lin * Omega
+   153       900    2005146.0   2227.9      0.0                      + self.noise_pow_lin
+   154                                                           )
+   155                                                       )
+   156                                           
+   157                                                       # Eq. (36)
+   158                                                       # NOTE: this commented implementation is according to the professor
+   159                                                       # equation, but it seems wrong
+   160                                                       # The correct one is fromm Ngo's article Eq. (8)
+   161                                                       # Gamma = np.sqrt(self.tau_cf * self.downlink_pow_lin) * Omega * C
+   162       900    3228652.0   3587.4      0.0              Gamma = np.sqrt(self.tau_cf * self.pilot_pow_lin) * Omega * C
+   163       900   13286028.0  14762.3      0.1              eta = (np.sum(Gamma, axis=-1, keepdims=True))**-1
+   164                                           
+   165                                                       # Eq. (37)
+   166                                                       # shape = (K,)
+   167      3600   11647472.0   3235.4      0.1              sinr_statistic_only = self.downlink_pow_lin * np.sum(
+   168       900    3901488.0   4335.0      0.0                  np.sqrt(eta) * Gamma, axis=0
+   169       900     154759.0    172.0      0.0              )**2 / (
+   170      3600   20555634.0   5709.9      0.1                  self.downlink_pow_lin * np.sum(Omega * np.sum(
+   171       900    2557482.0   2841.6      0.0                      eta * Gamma, axis=1, keepdims=True
+   172      1800    2312481.0   1284.7      0.0                  ), axis=0) + self.noise_pow_lin
+   173                                                       )
+   174       900     831590.0    924.0      0.0              assert sinr_statistic_only.shape == (self.K,)
+   175       900    1130474.0   1256.1      0.0              statistical_sinr[i] = sinr_statistic_only
+   176                                           
+   177     90900   18255704.0    200.8      0.1              for j in range(drops_per_geom):
+   178                                                           # UL Training (Chan. Estimation)
+   179                                                           # NOTE: rayleigh assumed
+   180     90000   18161134.0    201.8      0.1                  H = (
+   181    180000 1671639328.0   9286.9     11.9                      rng.normal(0, 1/np.sqrt(2), size=(self.M, self.K))
+   182     90000 1569989290.0  17444.3     11.1                      + 1j * rng.normal(0, 1/np.sqrt(2), size=(self.M, self.K))
+   183                                                           )
+   184     90000  395136928.0   4390.4      2.8                  G = np.sqrt(Omega) * H
+   185                                                           # NOTE: since we assume tau_cf >= K, there's no pilot
+   186                                                           # contamination, and we don't even need to define each pilot
+   187                                                           # we can go straight to projection
+   188                                                           # Eq. (33)
+   189     90000   17754325.0    197.3      0.1                  Y_pilot_proj = (
+   190    180000  518255280.0   2879.2      3.7                      np.sqrt(self.tau_cf * self.pilot_pow_lin) * G
+   191                                                               + (
+   192    180000 1661882457.0   9232.7     11.8                          rng.normal(0, self.noise_std_lin_per_component, size=(self.M, self.K))
+   193     90000 1601455825.0  17794.0     11.4                          + 1j * rng.normal(0, self.noise_std_lin_per_component, size=(self.M, self.K))
+   194                                                               )
+   195                                                           )
+   196                                                           # Eq. (34)
+   197     90000  247923765.0   2754.7      1.8                  G_est = C * Y_pilot_proj
+   198                                           
+   199                                                           # Eq. (21)
+   200                                                           # shape == (M, K, K)
+   201                                                           # (signal from AP, meant to user k', arriving at user k)
+   202     90000   20560324.0    228.4      0.1                  signal_ap_to_ue = (
+   203     90000 2700703765.0  30007.8     19.2                      np.sqrt(eta)[..., None] * G[..., None] * np.conj(G_est)[:, None, :]
+   204                                                           )
+   205     90000 1436831740.0  15964.8     10.2                  pow_at_ue_meant_for_ue = np.abs(np.sum(signal_ap_to_ue, axis=0))**2
+   206     90000  422733657.0   4697.0      3.0                  desired_at_ue = np.diag(pow_at_ue_meant_for_ue)
+   207     90000   63815235.0    709.1      0.5                  assert desired_at_ue.shape == (self.K,)
+   208     90000  687472921.0   7638.6      4.9                  interf_at_ue = np.sum(pow_at_ue_meant_for_ue, axis=1) - desired_at_ue
+   209     90000   14059132.0    156.2      0.1                  sinr = (
+   210    180000  270071581.0   1500.4      1.9                      self.downlink_pow_lin * desired_at_ue
+   211     90000  387123775.0   4301.4      2.7                      / (self.downlink_pow_lin * interf_at_ue + self.noise_pow_lin)
+   212                                                           )
+   213     90000   58631104.0    651.5      0.4                  assert sinr.shape == (self.K,)
+   214     90000  121768194.0   1353.0      0.9                  instantaneous_sinr[i][j] = sinr
+   215                                           
+   216         6      20421.0   3403.5      0.0          return CellFreeSimulationResults(
+   217         3        377.0    125.7      0.0              cell_free_ref=self,
+   218         3        503.0    167.7      0.0              num_geometries=geometry_instances,
+   219         3        309.0    103.0      0.0              num_blocks_per_geometry=drops_per_geom,
+   220         3       1651.0    550.3      0.0              num_ue=self.K,
+   221         3        264.0     88.0      0.0              statistical_sinr=statistical_sinr,
+   222         3        245.0     81.7      0.0              instantaneous_sinr=instantaneous_sinr,
+   223                                                   )
+
+ 14.10 seconds - /home/artistreak/projects/personal/com-mov/cell-free/main.py:111 - CellFree.simulate
